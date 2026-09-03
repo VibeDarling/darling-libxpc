@@ -156,6 +156,9 @@ XPC_CLASS_HEADER(pipe);
 	return status;
 }
 
+extern void __simple_kprintf(const char* format, ...);
+#define rxp_kprintf __simple_kprintf
+
 + (int)receiveMachMessageWithPort: (mach_port_t)port incomingMessage: (dispatch_mach_msg_t*)incomingMessage flags: (uint64_t)flags
 {
 	int status = 0;
@@ -167,12 +170,15 @@ XPC_CLASS_HEADER(pipe);
 retry:
 	if (message != NULL) { [message release]; }
 	message = dispatch_mach_msg_create(NULL, messageSize, DISPATCH_MACH_MSG_DESTRUCTOR_DEFAULT, &header);
+	rxp_kprintf("xpc_pipe: dispatch_mach_msg_create message=%p\n", (void*)message);
 	if (!message) {
 		status = ENOMEM;
 		goto out;
 	}
 
+	rxp_kprintf("xpc_pipe: before mach_msg RCV port=%u\n", port);
 	ret = mach_msg(header, MACH_RCV_MSG | MACH_RCV_LARGE | MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0) | MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AUDIT), 0, messageSize, port, 0, MACH_PORT_NULL);
+	rxp_kprintf("xpc_pipe: mach_msg RCV returned ret=%d\n", (int)ret);
 
 	status = [[self class] handleMachMessageReceiveReturnCode: ret];
 
@@ -195,10 +201,13 @@ out:
 	mach_msg_header_t* header = NULL;
 	mach_msg_return_t ret = MACH_MSG_SUCCESS;
 
+	rxp_kprintf("xpc_pipe: tryReceiveWithPort port=%u\n", port);
 	status = [[self class] receiveMachMessageWithPort: port incomingMessage: &message flags: flags];
+	rxp_kprintf("xpc_pipe: receiveMachMessageWithPort status=%d\n", status);
 
 	if (status == 0) {
 		header = dispatch_mach_msg_get_msg(message, NULL);
+	rxp_kprintf("xpc_pipe: got header id=%u size=%u\n", header->msgh_id, header->msgh_size);
 
 		if (header->msgh_id == XPC_MSGH_ID_MESSAGE || header->msgh_id == XPC_MSGH_ID_ASYNC_REPLY) {
 			XPC_CLASS(dictionary)* dict = nil;
@@ -235,10 +244,13 @@ out:
 	mach_msg_header_t* header = NULL;
 	mach_msg_header_t* replyHeader = NULL;
 
+	rxp_kprintf("xpc_pipe: tryReceiveWithPort port=%u\n", port);
 	status = [[self class] receiveMachMessageWithPort: port incomingMessage: &message flags: flags];
+	rxp_kprintf("xpc_pipe: receiveMachMessageWithPort status=%d\n", status);
 
 	if (status == 0) {
 		header = dispatch_mach_msg_get_msg(message, NULL);
+	rxp_kprintf("xpc_pipe: got header id=%u size=%u\n", header->msgh_id, header->msgh_size);
 
 		if (header->msgh_id == XPC_MSGH_ID_MESSAGE || header->msgh_id == XPC_MSGH_ID_ASYNC_REPLY) {
 			XPC_CLASS(dictionary)* dict = nil;
@@ -256,8 +268,15 @@ out:
 		} else {
 			replyHeader = NULL;
 			reply = dispatch_mach_msg_create(NULL, maximumMIGReplySize, DISPATCH_MACH_MSG_DESTRUCTOR_DEFAULT, &replyHeader);
-
+	rxp_kprintf("xpc_pipe: MIG reply=%p replyHeader=%p\n", (void*)reply, (void*)replyHeader);
+			if (!reply) {
+	rxp_kprintf("xpc_pipe: MIG reply alloc FAILED\n");
+				status = ENOMEM;
+				goto out;
+			}
+	rxp_kprintf("xpc_pipe: calling demuxer (launchd_mig_demux)\n");
 			status = [[self class] demux: header reply: replyHeader demuxer: demuxer];
+	rxp_kprintf("xpc_pipe: demuxer returned status=%d\n", status);
 		}
 	}
 
@@ -836,7 +855,10 @@ int xpc_pipe_routine(xpc_pipe_t xpipe, xpc_object_t xdict, xpc_object_t* reply) 
 
 XPC_EXPORT
 int xpc_pipe_try_receive(mach_port_t port, xpc_object_t* out_object, mach_port_t* out_local_port, boolean_t (*demuxer)(mach_msg_header_t* request, mach_msg_header_t* reply), mach_msg_size_t max_mig_reply_size, uint64_t flags) {
-	return [XPC_CLASS(pipe) tryReceiveWithPort: port incomingMessage: out_object replyPort: out_local_port maximumMIGReplySize: max_mig_reply_size flags: flags demuxer: demuxer];
+	rxp_kprintf("xpc_pipe: C-wrapper try_receive ENTER port=%u demuxer=%p\n", port, (void*)demuxer);
+	int r = [XPC_CLASS(pipe) tryReceiveWithPort: port incomingMessage: out_object replyPort: out_local_port maximumMIGReplySize: max_mig_reply_size flags: flags demuxer: demuxer];
+	rxp_kprintf("xpc_pipe: C-wrapper try_receive LEAVE r=%d\n", r);
+	return r;
 };
 
 XPC_EXPORT

@@ -23,6 +23,8 @@ void xpc_stub_init(void);
 
 extern void bootstrap_init(void); // in liblaunch
 
+extern void __simple_kprintf(const char* format, ...);
+
 XPC_EXPORT
 void _libxpc_initializer(void)
 {
