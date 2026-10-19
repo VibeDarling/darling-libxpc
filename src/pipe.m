@@ -218,7 +218,9 @@ out:
 				goto out;
 			}
 
-			*incomingMessage = dict;
+			// The deserializer autoreleases its result. The C pipe API
+			// transfers an owned reference to the caller.
+			*incomingMessage = [dict retain];
 
 			status = 0;
 		} else {
@@ -261,7 +263,7 @@ out:
 				goto out;
 			}
 
-			*incomingMessage = dict;
+			*incomingMessage = [dict retain];
 			*replyPort = header->msgh_local_port;
 
 			status = 0;
@@ -600,7 +602,7 @@ retry:
 					goto out;
 				}
 
-				*reply = dict;
+				*reply = [dict retain];
 
 				status = 0;
 			} else {
@@ -844,9 +846,14 @@ int xpc_pipe_routine_reply(xpc_object_t xdict) {
 
 XPC_EXPORT
 int xpc_pipe_routine(xpc_pipe_t xpipe, xpc_object_t xdict, xpc_object_t* reply) {
-	TO_OBJC_CHECKED(pipe, xpipe, pipe) {
-		TO_OBJC_CHECKED(dictionary, xdict, dict) {
-			return [pipe sendMessage: dict withSynchronousReply: reply flags: 0];
+	// The deserializer autoreleases the reply and the pipe methods retain it for the caller (+1), so the
+	// autoreleased references must be drained here: launchd's loop has no pool of its own, and objc4
+	// would create one that never drains.
+	@autoreleasepool {
+		TO_OBJC_CHECKED(pipe, xpipe, pipe) {
+			TO_OBJC_CHECKED(dictionary, xdict, dict) {
+				return [pipe sendMessage: dict withSynchronousReply: reply flags: 0];
+			}
 		}
 	}
 
@@ -856,7 +863,11 @@ int xpc_pipe_routine(xpc_pipe_t xpipe, xpc_object_t xdict, xpc_object_t* reply) 
 XPC_EXPORT
 int xpc_pipe_try_receive(mach_port_t port, xpc_object_t* out_object, mach_port_t* out_local_port, boolean_t (*demuxer)(mach_msg_header_t* request, mach_msg_header_t* reply), mach_msg_size_t max_mig_reply_size, uint64_t flags) {
 	rxp_kprintf("xpc_pipe: C-wrapper try_receive ENTER port=%u demuxer=%p\n", port, (void*)demuxer);
-	int r = [XPC_CLASS(pipe) tryReceiveWithPort: port incomingMessage: out_object replyPort: out_local_port maximumMIGReplySize: max_mig_reply_size flags: flags demuxer: demuxer];
+	int r;
+	// See xpc_pipe_routine: the received message is returned owned, everything autoreleased is drained here.
+	@autoreleasepool {
+		r = [XPC_CLASS(pipe) tryReceiveWithPort: port incomingMessage: out_object replyPort: out_local_port maximumMIGReplySize: max_mig_reply_size flags: flags demuxer: demuxer];
+	}
 	rxp_kprintf("xpc_pipe: C-wrapper try_receive LEAVE r=%d\n", r);
 	return r;
 };
@@ -868,7 +879,10 @@ int _xpc_pipe_handle_mig(mach_msg_header_t* request, mach_msg_header_t* reply, b
 
 XPC_EXPORT
 int xpc_pipe_receive(mach_port_t receive_port, xpc_object_t* out_msg, uint64_t flags) {
-	return [XPC_CLASS(pipe) receiveWithPort: receive_port incomingMessage: out_msg flags: flags];
+	// See xpc_pipe_routine: the received message is returned owned, everything autoreleased is drained here.
+	@autoreleasepool {
+		return [XPC_CLASS(pipe) receiveWithPort: receive_port incomingMessage: out_msg flags: flags];
+	}
 };
 
 XPC_EXPORT
@@ -895,9 +909,12 @@ int xpc_pipe_routine_forward(xpc_pipe_t xpipe, xpc_object_t xdict) {
 
 XPC_EXPORT
 int xpc_pipe_routine_with_flags(xpc_pipe_t xpipe, xpc_object_t xdict, xpc_object_t* reply, uint64_t flags) {
-	TO_OBJC_CHECKED(pipe, xpipe, pipe) {
-		TO_OBJC_CHECKED(dictionary, xdict, dict) {
-			return [pipe sendMessage: dict withSynchronousReply: reply flags: flags];
+	// See xpc_pipe_routine.
+	@autoreleasepool {
+		TO_OBJC_CHECKED(pipe, xpipe, pipe) {
+			TO_OBJC_CHECKED(dictionary, xdict, dict) {
+				return [pipe sendMessage: dict withSynchronousReply: reply flags: flags];
+			}
 		}
 	}
 
