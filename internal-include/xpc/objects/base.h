@@ -20,6 +20,20 @@
 #ifndef _XPC_OBJECTS_BASE_H_
 #define _XPC_OBJECTS_BASE_H_
 
+/* Keep this definition identical to the one in libdispatch's os/object_private.h:
+ * #ifndef makes whichever copy is seen first win silently. */
+#if __has_include(<ptrauth.h>)
+#include <ptrauth.h>
+#endif
+#ifndef __ptrauth_objc_isa_pointer
+#if __has_feature(ptrauth_calls)
+/* process-independent data key (DA), address-discriminated, 0x6AE1: the objc isa ABI */
+#define __ptrauth_objc_isa_pointer __ptrauth(2, 1, 0x6AE1)
+#else
+#define __ptrauth_objc_isa_pointer
+#endif
+#endif
+
 #import <os/object_private.h>
 #import <objc/NSObject.h>
 #import <xpc/internal_base.h>
@@ -172,7 +186,7 @@ struct xpc_object_vtable_s {
 
 struct xpc_object_s {
 	_OS_OBJECT_HEADER(
-		const struct xpc_object_vtable_s* os_obj_isa,
+		const struct xpc_object_vtable_s* __ptrauth_objc_isa_pointer os_obj_isa,
 		os_obj_ref_cnt,
 		os_obj_xref_cnt
 	);
